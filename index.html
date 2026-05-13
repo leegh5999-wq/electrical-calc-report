@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>전기계산서</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <h1>전기계산서</h1>
+      <span class="badge">KEC 2026 / KDS / KECG 1701-2021</span>
+    </div>
+    <div class="project-meta">
+      <label class="field-inline">
+        <span>프로젝트</span>
+        <input id="project-name" placeholder="프로젝트명" />
+      </label>
+      <label class="field-inline">
+        <span>현장</span>
+        <input id="project-site" placeholder="현장명" />
+      </label>
+      <button id="btn-import" class="btn-secondary" type="button">불러오기</button>
+      <button id="btn-export" class="btn-secondary" type="button">내보내기</button>
+      <button id="btn-print"  class="btn-secondary" type="button">인쇄</button>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <nav class="sidebar">
+      <h2>계산서</h2>
+      <ul class="nav-list">
+        <li><a href="#transformer" data-route>1. 변압기 용량</a></li>
+        <li><a href="#generator"   data-route>2. 발전기 용량</a></li>
+        <li><a href="#voltage-drop" data-route>3. 전압강하</a></li>
+        <li><a href="#mcc"          data-route>4. MCC (동력부하)</a></li>
+        <li><a href="#panels"      data-route>5. 분전반 (부하계산서)</a></li>
+        <li><a href="#trays"       data-route>6. 케이블 트레이</a></li>
+      </ul>
+
+      <h2>참조 자료</h2>
+      <ul class="nav-list">
+        <li><a href="#tables/design_conditions" data-route>설계조건</a></li>
+        <li><a href="#tables/lighting_fixtures" data-route>조명기구</a></li>
+        <li><a href="#tables/equipment_list" data-route>장비일람</a></li>
+        <li><a href="#tables/demand_factor" data-route>수용률</a></li>
+        <li><a href="#tables/cb" data-route>차단기 (CB)</a></li>
+        <li><a href="#tables/cable_data" data-route>케이블 데이터</a></li>
+        <li><a href="#tables/derating_factor" data-route>감쇄계수 (DF)</a></li>
+      </ul>
+
+      <div class="sidebar-foot">
+        <small id="storage-info">저장됨: -</small>
+      </div>
+    </nav>
+
+    <main id="view" class="view"></main>
+  </div>
+
+  <input id="file-input" type="file" accept="application/json,.json" hidden />
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python (used only for local tooling: extract_*.py)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code local launch config (machine-specific port etc.)
+.claude/
+
+# Build artifacts (none currently, future-proof)
+dist/
+build/
+node_modules/
