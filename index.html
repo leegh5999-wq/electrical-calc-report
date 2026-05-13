@@ -15,12 +15,10 @@
     <div class="project-meta">
       <label class="field-inline">
         <span>프로젝트</span>
-        <input id="project-name" placeholder="프로젝트명" />
+        <select id="project-switcher"></select>
       </label>
-      <label class="field-inline">
-        <span>현장</span>
-        <input id="project-site" placeholder="현장명" />
-      </label>
+      <button id="btn-project-new"    class="btn-secondary" type="button" title="새 프로젝트 만들기">+ 새</button>
+      <button id="btn-project-manage" class="btn-secondary" type="button" title="프로젝트 관리 (이름변경/복제/삭제)">관리</button>
       <button id="btn-import" class="btn-secondary" type="button">불러오기</button>
       <button id="btn-export" class="btn-secondary" type="button">내보내기</button>
       <button id="btn-print"  class="btn-secondary" type="button">인쇄</button>
