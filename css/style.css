@@ -1,5 +1,6 @@
 /* === Reset & base === */
 *, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: light; }   /* 다크 모드 UA에서도 폼 컨트롤이 light 테마로 렌더링되도록 */
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
   font-family: "Pretendard", "Malgun Gothic", "맑은 고딕", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -9,8 +10,18 @@ body {
   line-height: 1.45;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
-input, select, textarea { background: #fff; color: #222; border: 1px solid #ccd1d9; border-radius: 4px; padding: 4px 6px; }
-.app-header select { color: #222; }   /* 어두운 헤더에서 inherit 방지 명시 */
+input, select, textarea {
+  background: #fff !important;
+  color: #222 !important;
+  border: 1px solid #ccd1d9;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.app-header select,
+.app-header select option {
+  background: #fff !important;
+  color: #222 !important;
+}
 input:focus, select:focus, textarea:focus { outline: 2px solid #2563eb; outline-offset: -1px; border-color: transparent; }
 a { color: #2563eb; text-decoration: none; }
 a:hover { text-decoration: underline; }
