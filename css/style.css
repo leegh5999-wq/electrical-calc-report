@@ -268,6 +268,44 @@ a:hover { text-decoration: underline; }
   margin-bottom: 12px;
 }
 
+/* === 장비일람 섹션 === */
+.equip-section {
+  margin: 14px 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+}
+.equip-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #f3f4f6;
+  border-bottom: 1px solid #e5e7eb;
+  border-radius: 6px 6px 0 0;
+}
+.equip-section-name {
+  font-weight: 600;
+  font-size: 13px;
+  min-width: 180px;
+  flex: 0 0 auto;
+}
+.equip-section-stats {
+  flex: 1;
+  color: #6b7280;
+  font-size: 12px;
+}
+.equip-section-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.equip-section .t {
+  margin: 0;
+  border-radius: 0 0 6px 6px;
+}
+.equip-section .t thead th { border-top: none; }
+
 /* === Modal === */
 .modal-backdrop {
   position: fixed; inset: 0;

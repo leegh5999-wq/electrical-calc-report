@@ -12,6 +12,8 @@ import { renderTrayList,  renderTrayEditor }  from "./calculators/trays.js";
 import { renderVoltageDrop } from "./calculators/voltage_drop.js";
 import { renderLightingEditor } from "./views/lighting_editor.js";
 import { renderGenericEditor } from "./views/generic_editor.js";
+import { renderEquipmentEditor } from "./views/equipment_editor.js";
+import { renderDemandFactorEditor } from "./views/demand_factor_editor.js";
 import { renderDesignConditions } from "./views/design_conditions.js";
 import { openProjectManager, openNewProjectDialog } from "./views/project_manager.js";
 
@@ -89,6 +91,10 @@ async function route() {
         await renderLightingEditor(view, state, persist);
       } else if (slug === "design_conditions") {
         await renderDesignConditions(view, state, persist);
+      } else if (slug === "equipment_list") {
+        await renderEquipmentEditor(view, state, persist);
+      } else if (slug === "demand_factor") {
+        await renderDemandFactorEditor(view, state, persist);
       } else {
         await renderGenericEditor(view, state, persist, slug);
       }
