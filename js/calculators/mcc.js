@@ -18,6 +18,14 @@
 
 import { fmtInt, fmt1, fmt2, toNum, escapeHtml } from "../lib/format.js";
 import { buildDesignDefaults, MOTOR_START_METHODS, SYSTEM_VOLTAGES } from "../lib/design_schema.js";
+import { recommendBreakerAT, recommendCableSize, suggestAF } from "../lib/recommend.js";
+
+const COPPER_K_MCC = { "1Φ2W": 35.6, "1Φ3W": 17.8, "3Φ3W": 30.8, "3Φ4W": 17.8 };
+
+function mccCircuitVoltage(mcc) {
+  const v = toNum(mcc.voltage) || 380;
+  return v / (mcc.phase === "3Φ4W" ? Math.sqrt(3) : 1);
+}
 
 const MCC_KIND_OPTIONS = ["MCC-F (소방)", "MCC-N (일반)", "MCP-PIT (피트)", "MCP-기타", "기타"];
 const PHASE_OPTIONS = [
@@ -325,6 +333,10 @@ export function renderMccEditor(view, state, save, id) {
       <div class="add-row">
         <button class="btn" id="btn-add-motor">+ 모터 추가</button>
         <button class="btn-secondary" id="btn-add-nonmotor">+ 일반부하 추가</button>
+        <button class="btn-secondary" id="btn-auto-recommend"
+                title="빈 칸의 케이블 단면적을 자동 추천 (KEC 232.5 + 전압강하 한계)">
+          🔧 빈 칸 자동 추천
+        </button>
       </div>
 
       <section class="result">
@@ -466,6 +478,29 @@ export function renderMccEditor(view, state, save, id) {
   view.querySelector("#btn-add-nonmotor").addEventListener("click", () => {
     m.motors.push({ ...newMotor(), loadKind: "P", inputKva: 1, startMethod: "DOL" });
     save(state); renderRows(); recalc();
+  });
+
+  // 자동 추천 — 모터의 케이블 단면적을 IB 기준 + 전압강하 한계로 채움
+  view.querySelector("#btn-auto-recommend").addEventListener("click", () => {
+    const branchLimit = toNum(dc.vdAllowedBranchPL) || 3;
+    const k = COPPER_K_MCC[m.phase] ?? 35.6;
+    const v = mccCircuitVoltage(m);
+
+    let sizeFilled = 0;
+    for (const mo of m.motors) {
+      if (mo.loadKind === "SP") continue;
+      const r = computeMotor(mo, m, dc);
+      const ib = r.ib;
+      if (!Number.isFinite(ib) || ib <= 0) continue;
+
+      const lengthM = toNum(mo.cableLengthM) ?? 0;
+      if ((toNum(mo.cableSizeMm2) == null || mo.cableSizeMm2 === "" || mo.cableSizeMm2 === 0) && v > 0) {
+        const sizeRec = recommendCableSize({ ib, lengthM, voltage: v, vdLimit: branchLimit, k, dc });
+        if (sizeRec) { mo.cableSizeMm2 = sizeRec; sizeFilled++; }
+      }
+    }
+    save(state); renderRows(); recalc();
+    alert(`자동 추천 완료: 케이블 ${sizeFilled}개 채움. (모터 차단기는 기동전류 IMS 기반 별도 산정이라 자동 추천 대상에서 제외 — 추후 추가)`);
   });
 
   view.querySelector("#btn-mcc-delete").addEventListener("click", () => {

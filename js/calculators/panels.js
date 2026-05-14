@@ -10,6 +10,23 @@
 import { fmtInt, fmt1, fmt2, toNum, escapeHtml } from "../lib/format.js";
 import { buildDesignDefaults } from "../lib/design_schema.js";
 import { getTable } from "../lib/tables.js";
+import { recommendBreakerAT, recommendCableSize, suggestAF } from "../lib/recommend.js";
+
+const COPPER_K = { "1Φ2W": 35.6, "1Φ3W": 17.8, "3Φ3W": 30.8, "3Φ4W": 17.8 };
+
+function panelCircuitVoltage(panel) {
+  const v = toNum(panel.voltage) || 220;
+  return v / (panel.phase?.startsWith("3Φ4W") ? Math.sqrt(3) : 1);
+}
+
+function circuitIB(circuit, panel) {
+  const cnt = toNum(circuit.count) ?? 0;
+  const w   = toNum(circuit.wattEa) ?? 0;
+  const pf  = toNum(circuit.powerFactor) || 1;
+  const va  = cnt * w / pf;
+  const v   = panelCircuitVoltage(panel);
+  return v > 0 ? va / v : 0;
+}
 
 const PANEL_TYPES = ["LP", "LS", "LT", "L-", "S-", "P-", "EV", "기타"];
 const PHASE_OPTIONS = [
@@ -451,6 +468,10 @@ export async function renderPanelEditor(view, state, save, id) {
       <div class="add-row">
         <button class="btn" id="btn-add-circuit">+ 회로 추가</button>
         <button class="btn-secondary" id="btn-add-spare" title="SPARE 회로 1개 추가">+ SPARE</button>
+        <button class="btn-secondary" id="btn-auto-recommend"
+                title="빈 칸의 차단기 AT / AF / 케이블 단면적을 자동 추천 (KEC 212.4 / 232.5)">
+          🔧 빈 칸 자동 추천
+        </button>
       </div>
 
       <section class="result">
@@ -649,6 +670,46 @@ export async function renderPanelEditor(view, state, save, id) {
     save(state);
     renderRows();
     recalc();
+  });
+
+  // 차단기·케이블 자동 추천 — 빈 칸만 채움 (사용자 입력 보존)
+  view.querySelector("#btn-auto-recommend").addEventListener("click", () => {
+    const dc = { ...buildDesignDefaults(), ...(state.designConditions || {}) };
+    const branchLimit = toNum(dc.vdAllowedBranchPL) || 3;
+    const k = COPPER_K[p.phase] ?? 35.6;
+    const v = panelCircuitVoltage(p);
+
+    let atFilled = 0, sizeFilled = 0;
+    for (const c of p.circuits) {
+      if (c.kind === "SP") continue;          // 예비 회로는 건너뜀
+      const ib = circuitIB(c, p);
+      if (!Number.isFinite(ib) || ib <= 0) continue;
+
+      // 차단기 종류: 60A 이하 → MCB, 그 이상 → MCCB
+      const breakerKind = ib <= 60 ? "MCB" : "MCCB";
+      const atRec = recommendBreakerAT(ib, breakerKind);
+      if (atRec) {
+        if (toNum(c.breakerAT) == null || c.breakerAT === "" || c.breakerAT === 0) {
+          c.breakerAT = atRec; atFilled++;
+        }
+        if (toNum(c.breakerAF) == null || c.breakerAF === "" || c.breakerAF === 0) {
+          c.breakerAF = suggestAF(atRec);
+        }
+        if (!c.breakerType) c.breakerType = breakerKind;
+        if (!c.breakerP)    c.breakerP = (p.phase?.startsWith("3Φ") && c.kind === "P") ? 3 : 2;
+      }
+
+      // 케이블 단면적 — 길이가 있어야만 VD 계산 가능
+      const lengthM = toNum(c.cableLengthM) ?? 0;
+      if ((toNum(c.cableSizeMm2) == null || c.cableSizeMm2 === "" || c.cableSizeMm2 === 0) && v > 0) {
+        const sizeRec = recommendCableSize({ ib, lengthM, voltage: v, vdLimit: branchLimit, k, dc });
+        if (sizeRec) { c.cableSizeMm2 = sizeRec; sizeFilled++; }
+      }
+    }
+    save(state);
+    renderRows();
+    recalc();
+    alert(`자동 추천 완료: AT ${atFilled}개, 케이블 ${sizeFilled}개 채움.`);
   });
 
   view.querySelector("#btn-delete").addEventListener("click", () => {
