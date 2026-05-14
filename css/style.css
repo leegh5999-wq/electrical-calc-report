@@ -268,6 +268,57 @@ a:hover { text-decoration: underline; }
   margin-bottom: 12px;
 }
 
+/* === Generic editor sub-table cards === */
+.gen-section {
+  margin: 14px 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+}
+.gen-section-head {
+  padding: 8px 14px;
+  background: #f3f4f6;
+  border-bottom: 1px solid #e5e7eb;
+  border-radius: 6px 6px 0 0;
+}
+.gen-section-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+.gen-section .raw-grid-wrap {
+  border: none;
+  border-radius: 0 0 6px 6px;
+}
+
+/* === Cable card grid === */
+.cable-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.cable-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+}
+.cable-card-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #2563eb;
+}
+.cable-card .t input { width: 100%; min-width: 50px; text-align: right; }
+.cable-card-raw {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
 /* === 장비일람 섹션 === */
 .equip-section {
   margin: 14px 0;
