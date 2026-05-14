@@ -24,7 +24,6 @@ export function createInitialState() {
     createdAt: nowIso(),
     updatedAt: nowIso(),
     projectName: "",
-    projectSite: "",
     transformer: null,
     generator: null,
     panels: [],
@@ -34,6 +33,19 @@ export function createInitialState() {
   };
 }
 
+// 기존 projectSite 가 있던 프로젝트는 projectName 에 결합 후 site 필드 제거
+function mergeSiteIntoName(state) {
+  if (state.projectSite) {
+    if (state.projectName && state.projectName !== state.projectSite) {
+      state.projectName = `${state.projectName} / ${state.projectSite}`;
+    } else if (!state.projectName) {
+      state.projectName = state.projectSite;
+    }
+    delete state.projectSite;
+  }
+  return state;
+}
+
 // ── Index ────────────────────────────────────────────────────────────────
 export function loadIndex() {
   // 1) 마이그레이션 (있다면 1회만)
@@ -41,11 +53,11 @@ export function loadIndex() {
     try {
       const legacy = JSON.parse(localStorage.getItem(KEY_LEGACY));
       if (legacy && legacy.schema === SCHEMA) {
+        mergeSiteIntoName(legacy);
         const id = uuid();
         const meta = {
           id,
           name: legacy.projectName || "프로젝트 1",
-          site: legacy.projectSite || "",
           createdAt: legacy.createdAt || nowIso(),
           updatedAt: legacy.updatedAt || nowIso(),
         };
@@ -63,13 +75,35 @@ export function loadIndex() {
   let raw = localStorage.getItem(KEY_INDEX);
   if (!raw) {
     const id = uuid();
-    const meta = { id, name: "프로젝트 1", site: "", createdAt: nowIso(), updatedAt: nowIso() };
+    const meta = { id, name: "프로젝트 1", createdAt: nowIso(), updatedAt: nowIso() };
     const index = { schema: SCHEMA, currentId: id, projects: [meta] };
     localStorage.setItem(KEY_INDEX, JSON.stringify(index));
     localStorage.setItem(KEY_PROJECT_PREFIX + id, JSON.stringify(createInitialState()));
     return index;
   }
-  return JSON.parse(raw);
+  // 기존 인덱스의 site 필드 마이그레이션 (한 번만)
+  const index = JSON.parse(raw);
+  let migrated = false;
+  for (const p of index.projects) {
+    if (p.site) {
+      p.name = p.name && p.name !== p.site ? `${p.name} / ${p.site}` : (p.name || p.site);
+      delete p.site;
+      migrated = true;
+      // 프로젝트 본체 state 도 정리
+      const stKey = KEY_PROJECT_PREFIX + p.id;
+      const stRaw = localStorage.getItem(stKey);
+      if (stRaw) {
+        try {
+          const st = JSON.parse(stRaw);
+          mergeSiteIntoName(st);
+          st.projectName = p.name;
+          localStorage.setItem(stKey, JSON.stringify(st));
+        } catch {}
+      }
+    }
+  }
+  if (migrated) saveIndex(index);
+  return index;
 }
 
 function saveIndex(index) {
@@ -90,29 +124,26 @@ export function loadProject(id) {
 export function saveProject(id, state) {
   state.updatedAt = nowIso();
   localStorage.setItem(KEY_PROJECT_PREFIX + id, JSON.stringify(state));
-  // 인덱스에도 updatedAt 반영 + name/site sync
+  // 인덱스에 updatedAt + name sync
   const index = loadIndex();
   const meta = index.projects.find(p => p.id === id);
   if (meta) {
     meta.updatedAt = state.updatedAt;
-    // projectName/Site → meta로 sync
     if (state.projectName != null && state.projectName !== meta.name) meta.name = state.projectName;
-    if (state.projectSite != null && state.projectSite !== meta.site) meta.site = state.projectSite;
     saveIndex(index);
   }
 }
 
 // ── CRUD ─────────────────────────────────────────────────────────────────
-export function createProject(name = "프로젝트", site = "") {
+export function createProject(name = "프로젝트") {
   const index = loadIndex();
   const id = uuid();
-  const meta = { id, name, site, createdAt: nowIso(), updatedAt: nowIso() };
+  const meta = { id, name, createdAt: nowIso(), updatedAt: nowIso() };
   index.projects.push(meta);
   index.currentId = id;
   saveIndex(index);
   const state = createInitialState();
   state.projectName = name;
-  state.projectSite = site;
   localStorage.setItem(KEY_PROJECT_PREFIX + id, JSON.stringify(state));
   return meta;
 }
@@ -126,7 +157,6 @@ export function duplicateProject(sourceId, newName) {
   const meta = {
     id,
     name: newName || `${src.name} (복사본)`,
-    site: src.site,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -140,18 +170,15 @@ export function duplicateProject(sourceId, newName) {
   return meta;
 }
 
-export function renameProject(id, newName, newSite = null) {
+export function renameProject(id, newName) {
   const index = loadIndex();
   const meta = index.projects.find(p => p.id === id);
   if (!meta) return false;
   meta.name = newName;
-  if (newSite != null) meta.site = newSite;
   meta.updatedAt = nowIso();
   saveIndex(index);
-  // project 내부 projectName/Site도 sync
   const state = loadProject(id);
   state.projectName = newName;
-  if (newSite != null) state.projectSite = newSite;
   state.updatedAt = meta.updatedAt;
   localStorage.setItem(KEY_PROJECT_PREFIX + id, JSON.stringify(state));
   return true;
@@ -213,16 +240,15 @@ export function importFromFile(file) {
 
 // 불러온 데이터를 새 프로젝트로 추가
 export function importAsNewProject(data) {
+  mergeSiteIntoName(data);
   const id = uuid();
   const name = data.projectName || "불러온 프로젝트";
-  const site = data.projectSite || "";
-  const meta = { id, name, site, createdAt: nowIso(), updatedAt: nowIso() };
+  const meta = { id, name, createdAt: nowIso(), updatedAt: nowIso() };
   const index = loadIndex();
   index.projects.push(meta);
   index.currentId = id;
   saveIndex(index);
   data.projectName = name;
-  data.projectSite = site;
   data.updatedAt = meta.updatedAt;
   localStorage.setItem(KEY_PROJECT_PREFIX + id, JSON.stringify(data));
   return meta;

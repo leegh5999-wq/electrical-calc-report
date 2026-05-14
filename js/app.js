@@ -41,8 +41,7 @@ function refreshProjectSwitcher() {
   const sel = document.getElementById("project-switcher");
   if (!sel) return;
   sel.innerHTML = index.projects.map(p => {
-    const label = p.site ? `${p.name} · ${p.site}` : p.name;
-    return `<option value="${p.id}" ${p.id === index.currentId ? "selected" : ""}>${escapeOption(label)}</option>`;
+    return `<option value="${p.id}" ${p.id === index.currentId ? "selected" : ""}>${escapeOption(p.name)}</option>`;
   }).join("");
 }
 
@@ -123,9 +122,9 @@ function bindGlobals() {
 
   // + 새 프로젝트
   document.getElementById("btn-project-new").addEventListener("click", () => {
-    openNewProjectDialog((name, site) => {
-      createProject(name, site);
-      switchToCurrentProject(true);   // createProject가 currentId도 새것으로 설정
+    openNewProjectDialog((name) => {
+      createProject(name);
+      switchToCurrentProject(true);
     });
   });
 
