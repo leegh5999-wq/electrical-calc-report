@@ -162,6 +162,11 @@ export async function renderGenerator(view, state, save) {
         <h3 style="color:#9a3412;">기동전류 영향 분석 (MCC 모터)</h3>
         <div id="g-start-body"></div>
       </section>
+
+      <section id="g-kds-sizing" class="result" style="background:#ecfeff; border-color:#a5f3fc;">
+        <h3 style="color:#0e7490;">KDS 정밀 산정 (KDS 31 35 30 / KECG-1702)</h3>
+        <div id="g-kds-body"></div>
+      </section>
     </article>
   `;
 
@@ -251,6 +256,89 @@ export async function renderGenerator(view, state, save) {
     `;
   }
 
+  // KDS 31 35 30 / KECG-1702 정밀 발전기 용량 산정
+  //   GP1 = ∑(P_i / (η_i × cosφ_i))                ... 정상 운전
+  //   GP2 = GP1 + ΔPm_max                          ... 최대 모터 기동 시 추가 부하
+  //   요구 정격 = max(GP1, GP2)
+  //   KS 표준 권장 = ceil(요구 / loadMargin)
+  function renderKdsSizing() {
+    const body = view.querySelector("#g-kds-body");
+
+    // 1) 일반 부하 (발전기 부하 행 — 비상부하만 발전기 부담)
+    const generalLoadPf = toNum(dc.loadPowerFactor) || 0.85;
+    const generalLoadEta = toNum(dc.loadEfficiency) || 1.0;
+    const generalKW = Math.max(
+      g.loads.reduce((a, l) => a + (toNum(l.fireKw)     ?? 0), 0),
+      g.loads.reduce((a, l) => a + (toNum(l.blackoutKw) ?? 0), 0),
+    );
+    const generalKVA = generalLoadEta > 0 && generalLoadPf > 0
+      ? generalKW / (generalLoadEta * generalLoadPf) : 0;
+
+    // 2) MCC 모터 (각 정밀 데이터 사용)
+    const motors = [];
+    for (const mcc of (state.mccPanels || [])) {
+      for (const mo of mcc.motors) {
+        if (mo.loadKind !== "M") continue;
+        const r = computeMotor(mo, mcc, dc);
+        if (r.kva <= 0) continue;
+        const startMult = r.ib > 0 ? (r.ims / r.ib) : 0;
+        motors.push({
+          name: mo.equipName || mo.equipNo || "(이름없음)",
+          mccName: mcc.name,
+          method: mo.startMethod,
+          kva: r.kva,
+          startKva: r.kva * startMult,
+          extra: r.kva * (startMult - 1),    // 기동 추가 부하
+          beta: r.beta, c: r.c,
+        });
+      }
+    }
+    const motorsKVA = motors.reduce((a, m) => a + m.kva, 0);
+
+    // 3) GP1 = 모든 부하의 정상 입력 kVA 합
+    const gp1 = generalKVA + motorsKVA;
+
+    // 4) GP2 = 가장 큰 모터 기동 시 (extra 가 최대인 모터)
+    const maxMotor = motors.length > 0
+      ? motors.reduce((best, m) => (!best || m.extra > best.extra) ? m : best, null)
+      : null;
+    const gp2 = maxMotor ? gp1 + maxMotor.extra : gp1;
+
+    // 5) 요구 정격, KS 표준 권장 (loadMargin 적용)
+    const required = Math.max(gp1, gp2);
+    const margin = toNum(dc.generatorLoadMargin) || 0.85;
+    const ksRec = pickKsCapacity(required, margin);
+
+    body.innerHTML = `
+      <dl class="result-grid" style="grid-template-columns: repeat(4, 1fr); gap: 6px 16px;">
+        <dt>일반 부하 (비상 합계 / η·cosφ)</dt>      <dd>${fmt2(generalKVA)} kVA</dd>
+        <dt>MCC 모터 합계</dt>                         <dd>${fmt2(motorsKVA)} kVA</dd>
+        <dt><strong>GP1 정상 운전</strong></dt>        <dd><strong>${fmt2(gp1)} kVA</strong></dd>
+        <dt>(η<sub>일반</sub>=${fmt2(generalLoadEta)}, cosφ<sub>일반</sub>=${fmt2(generalLoadPf)})</dt>
+        <dd></dd>
+
+        ${maxMotor ? `
+          <dt style="grid-column:1/-1; margin-top:6px; color:#0e7490; font-weight:600;">최대 기동 모터 (추가 부하 기준)</dt>
+          <dt>명칭</dt>                  <dd>${escapeHtml(maxMotor.name)} (${escapeHtml(maxMotor.mccName)})</dd>
+          <dt>기동방식</dt>              <dd>${escapeHtml(maxMotor.method)} (β=${fmt2(maxMotor.beta)}, C=${fmt2(maxMotor.c)})</dd>
+          <dt>정상 / 기동 kVA</dt>       <dd>${fmt2(maxMotor.kva)} → <strong>${fmt2(maxMotor.startKva)}</strong></dd>
+          <dt>기동 추가 부하</dt>        <dd><strong>+${fmt2(maxMotor.extra)} kVA</strong></dd>
+        ` : ""}
+
+        <dt style="grid-column:1/-1; margin-top:6px; color:#0e7490; font-weight:600;">정격 산정</dt>
+        <dt>GP1 (정상)</dt>              <dd>${fmt2(gp1)} kVA</dd>
+        <dt><strong>GP2 (최대 기동)</strong></dt>   <dd><strong>${fmt2(gp2)} kVA</strong></dd>
+        <dt>요구 정격 = max(GP1, GP2)</dt> <dd><strong>${fmt2(required)} kVA</strong></dd>
+        <dt><strong>KS 표준 권장</strong> <small>(부하율 ${fmt2(margin)})</small></dt>
+        <dd class="verdict-ok"><strong>${fmtInt(ksRec)} kVA</strong></dd>
+      </dl>
+      <small style="color:#0e7490; display:block; margin-top:8px;">
+        ※ 식: <code>GP1 = Σ(P/(η·cosφ))</code>, <code>GP2 = GP1 + ΔPm_max</code>, <code>발전기 = max(GP1, GP2) ÷ 부하율</code> → KS 올림.
+        ※ 일반 부하 효율·역률은 설계조건의 <code>loadEfficiency</code>·<code>loadPowerFactor</code> 사용. MCC 모터는 개별 입력값 사용.
+      </small>
+    `;
+  }
+
   function recalc() {
     const sumConn = g.loads.reduce((a, l) => a + (toNum(l.connectedKw) ?? 0), 0);
     const sumTot  = g.loads.reduce((a, l) => a + rowSum(l), 0);
@@ -303,6 +391,8 @@ export async function renderGenerator(view, state, save) {
 
     // 기동전류 영향 분석 갱신
     renderStartAnalysis(selected);
+    // KDS 정밀 산정 갱신
+    renderKdsSizing();
   }
 
   // Header bindings
