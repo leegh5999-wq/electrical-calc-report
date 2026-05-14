@@ -205,16 +205,47 @@ export function setCurrentProject(id) {
 }
 
 // ── JSON Import / Export ─────────────────────────────────────────────────
-// 단일 프로젝트 내보내기 (현재 활성)
-export function exportToFile(state, projectName = "ecr") {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+// 단일 프로젝트 저장 (현재 활성). File System Access API 지원 시 폴더/파일명 선택 가능,
+// 미지원 브라우저(Firefox/Safari)에서는 다운로드 폴더로 폴백.
+//
+// returns:  "saved"  – 저장 완료
+//           "cancel" – 사용자가 다이얼로그 취소
+//           "error"  – 실패 (콘솔 에러 출력)
+export async function exportToFile(state, projectName = "ecr") {
+  const safeName = (projectName || "ecr").replace(/[^\p{L}\p{N}_-]+/gu, "_");
+  const filename = `${safeName}_${nowIso().slice(0, 10)}.json`;
+  const json = JSON.stringify(state, null, 2);
+
+  // 1) Modern: File System Access API (Chrome/Edge 86+, Opera, 등)
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{
+          description: "전기계산서 JSON",
+          accept: { "application/json": [".json"] },
+        }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      return "saved";
+    } catch (err) {
+      if (err.name === "AbortError") return "cancel";   // 사용자가 다이얼로그 닫음
+      console.error("File save failed:", err);
+      // 다른 오류면 폴백 시도
+    }
+  }
+
+  // 2) Fallback: 기존 다운로드 방식 (Firefox/Safari/구버전)
+  const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const safeName = (projectName || "ecr").replace(/[^\p{L}\p{N}_-]+/gu, "_");
   a.href = url;
-  a.download = `${safeName}_${nowIso().slice(0, 10)}.json`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+  return "saved";
 }
 
 // 파일에서 불러와서 새 프로젝트로 추가

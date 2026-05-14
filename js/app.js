@@ -136,9 +136,16 @@ function bindGlobals() {
     });
   });
 
-  // 내보내기
-  document.getElementById("btn-export").addEventListener("click", () => {
-    exportToFile(state, state.projectName);
+  // 저장 (JSON 파일로 — 폴더 선택 가능)
+  document.getElementById("btn-export").addEventListener("click", async () => {
+    try {
+      const result = await exportToFile(state, state.projectName);
+      // 사용자 취소 시 조용히 종료, 저장 성공/폴백 시 별도 알림 없음
+      if (result === "error") alert("저장 중 오류가 발생했습니다. 콘솔을 확인해 주세요.");
+    } catch (err) {
+      console.error(err);
+      alert("저장 실패: " + err.message);
+    }
   });
 
   // 인쇄
