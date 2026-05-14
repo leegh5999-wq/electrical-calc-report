@@ -10,6 +10,7 @@ import { renderPanelList, renderPanelEditor } from "./calculators/panels.js";
 import { renderMccList,   renderMccEditor }   from "./calculators/mcc.js";
 import { renderTrayList,  renderTrayEditor }  from "./calculators/trays.js";
 import { renderVoltageDrop } from "./calculators/voltage_drop.js";
+import { renderGrounding } from "./calculators/grounding.js";
 import { renderLightingEditor } from "./views/lighting_editor.js";
 import { renderGenericEditor } from "./views/generic_editor.js";
 import { renderEquipmentEditor } from "./views/equipment_editor.js";
@@ -86,6 +87,8 @@ async function route() {
     } else if (hash.startsWith("tray/")) {
       const id = hash.slice("tray/".length);
       renderTrayEditor(view, state, persist, id);
+    } else if (hash === "grounding") {
+      renderGrounding(view, state, persist);
     } else if (hash.startsWith("tables/")) {
       const slug = hash.slice("tables/".length);
       if (slug === "lighting_fixtures") {
