@@ -54,6 +54,10 @@ export const DESIGN_SCHEMA = [
         help: "산정 용량 = (비상부하 ÷ η ÷ cosφ) × 여유계수." },
       { key: "generatorLoadMargin",    label: "발전기 부하율 한계", type: "number", default: 0.85, step: 0.01, min: 0.5, max: 1.0,
         help: "자동 KS 표준 용량 선정 및 판정 임계값." },
+      { key: "generatorReactance",     label: "발전기 차동기 임피던스 Xd″", type: "number", default: 0.25, step: 0.01, min: 0.1, max: 0.5,
+        help: "PG3 단자 전압강하 산정에 사용 (p.u., 보통 0.2~0.3)." },
+      { key: "generatorTerminalVdLimit", label: "발전기 단자 전압강하 한계 ΔV", type: "number", default: 0.25, step: 0.01, min: 0.1, max: 0.4,
+        help: "PG3 산정 시 모터 기동 중 허용 전압강하율 (보통 0.2~0.25)." },
       { key: "buildingType",           label: "건축물 종류",       type: "select",
         options: [
           { value: "사무실",     label: "사무실" },

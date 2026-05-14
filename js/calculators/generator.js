@@ -167,6 +167,11 @@ export async function renderGenerator(view, state, save) {
         <h3 style="color:#0e7490;">KDS 정밀 산정 (KDS 31 35 30 / KECG-1702)</h3>
         <div id="g-kds-body"></div>
       </section>
+
+      <section id="g-pg-sizing" class="result" style="background:#f5f3ff; border-color:#ddd6fe;">
+        <h3 style="color:#6d28d9;">PG법 4가지 산정 비교 (KECG-1702)</h3>
+        <div id="g-pg-body"></div>
+      </section>
     </article>
   `;
 
@@ -393,6 +398,120 @@ export async function renderGenerator(view, state, save) {
     renderStartAnalysis(selected);
     // KDS 정밀 산정 갱신
     renderKdsSizing();
+    // PG법 4가지 비교
+    renderPgSizing();
+  }
+
+  // KECG-1702 PG법 4가지 — 표준 산정 방법 비교
+  //   PG1 = 정상 운전 부하 (= GP1)
+  //   PG2 = 부하 운전 중 최대 모터 기동 (= GP2)
+  //   PG3 = 단자 전압강하 한계
+  //         PG3 = P_기동 × Xd″ / (ΔV × cosφ_s)
+  //   PG4 = max(PG1, PG2, PG3) — 권장 발전기 정격
+  function renderPgSizing() {
+    const body = view.querySelector("#g-pg-body");
+
+    // 일반 부하 + MCC 모터 (KDS와 동일하게 수집)
+    const generalLoadPf = toNum(dc.loadPowerFactor) || 0.85;
+    const generalLoadEta = toNum(dc.loadEfficiency) || 1.0;
+    const generalKW = Math.max(
+      g.loads.reduce((a, l) => a + (toNum(l.fireKw)     ?? 0), 0),
+      g.loads.reduce((a, l) => a + (toNum(l.blackoutKw) ?? 0), 0),
+    );
+    const generalKVA = generalLoadEta > 0 && generalLoadPf > 0
+      ? generalKW / (generalLoadEta * generalLoadPf) : 0;
+
+    const motors = [];
+    for (const mcc of (state.mccPanels || [])) {
+      for (const mo of mcc.motors) {
+        if (mo.loadKind !== "M") continue;
+        const r = computeMotor(mo, mcc, dc);
+        if (r.kva <= 0) continue;
+        const startMult = r.ib > 0 ? (r.ims / r.ib) : 0;
+        motors.push({
+          name: mo.equipName || mo.equipNo,
+          mccName: mcc.name,
+          kva: r.kva,
+          startKva: r.kva * startMult,
+          extra: r.kva * (startMult - 1),
+        });
+      }
+    }
+    const motorsKVA = motors.reduce((a, m) => a + m.kva, 0);
+
+    // PG1
+    const pg1 = generalKVA + motorsKVA;
+    // PG2
+    const maxExtraMotor = motors.length > 0
+      ? motors.reduce((b, m) => (!b || m.extra > b.extra) ? m : b, null)
+      : null;
+    const pg2 = maxExtraMotor ? pg1 + maxExtraMotor.extra : pg1;
+    // PG3 — 단자전압강하 한계
+    const Xd       = toNum(dc.generatorReactance) || 0.25;
+    const vdLimit  = toNum(dc.generatorTerminalVdLimit) || 0.25;
+    const cosPhiS  = toNum(dc.motorStartPF) || 0.2;
+    const maxStartMotor = motors.length > 0
+      ? motors.reduce((b, m) => (!b || m.startKva > b.startKva) ? m : b, null)
+      : null;
+    let pg3 = 0;
+    if (maxStartMotor && vdLimit > 0 && cosPhiS > 0) {
+      // PG3 ≈ 기동 kVA × Xd″ / (ΔV × cosφ_s)
+      pg3 = maxStartMotor.startKva * Xd / (vdLimit * cosPhiS);
+    }
+    // PG4 = max
+    const pg4 = Math.max(pg1, pg2, pg3);
+    const margin = toNum(dc.generatorLoadMargin) || 0.85;
+    const ksRec = pickKsCapacity(pg4, margin);
+
+    // 어느 PG가 가장 크게 나왔는지
+    let governing = "PG1";
+    let pgMax = pg1;
+    if (pg2 > pgMax) { governing = "PG2"; pgMax = pg2; }
+    if (pg3 > pgMax) { governing = "PG3"; pgMax = pg3; }
+
+    body.innerHTML = `
+      <table class="t">
+        <thead>
+          <tr>
+            <th style="width:50px">방법</th>
+            <th>산정식 개요</th>
+            <th class="num" style="width:120px">결과 [kVA]</th>
+            <th>의미</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr ${governing === "PG1" ? 'style="background:#fef3c7;"' : ""}>
+            <td><strong>PG1</strong></td>
+            <td>∑P / (η · cosφ)</td>
+            <td class="num">${fmt2(pg1)}</td>
+            <td>정상 운전 부하</td>
+          </tr>
+          <tr ${governing === "PG2" ? 'style="background:#fef3c7;"' : ""}>
+            <td><strong>PG2</strong></td>
+            <td>PG1 + Pm<sub>max</sub> × (β·C − 1) / (η·cosφ)</td>
+            <td class="num">${fmt2(pg2)}</td>
+            <td>최대 모터 기동 시</td>
+          </tr>
+          <tr ${governing === "PG3" ? 'style="background:#fef3c7;"' : ""}>
+            <td><strong>PG3</strong></td>
+            <td>P<sub>기동</sub> × Xd″ / (ΔV · cosφ<sub>s</sub>)</td>
+            <td class="num">${fmt2(pg3)}</td>
+            <td>단자 전압강하 한계 (Xd″=${fmt2(Xd)}, ΔV=${fmt2(vdLimit)}, cosφ<sub>s</sub>=${fmt2(cosPhiS)})</td>
+          </tr>
+          <tr style="background:#ddd6fe; font-weight:600;">
+            <td><strong>PG4</strong></td>
+            <td>max(PG1, PG2, PG3)</td>
+            <td class="num"><strong>${fmt2(pg4)}</strong></td>
+            <td>지배 = <strong>${governing}</strong> → KS 권장 <strong>${fmtInt(ksRec)} kVA</strong> (부하율 ${fmt2(margin)})</td>
+          </tr>
+        </tbody>
+      </table>
+      <small style="color:#6d28d9; display:block; margin-top:8px;">
+        ※ Xd″·ΔV·cosφ<sub>s</sub> 는 <a href="#tables/design_conditions">설계조건</a>의
+        <code>generatorReactance</code>·<code>generatorTerminalVdLimit</code>·<code>motorStartPF</code> 사용.
+        ※ PG3가 지배적이면 발전기 임피던스 ↓ 또는 모터 기동 방식 변경(Y-D·S.S·INV) 고려.
+      </small>
+    `;
   }
 
   // Header bindings
