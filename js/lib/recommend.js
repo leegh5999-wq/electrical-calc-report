@@ -79,6 +79,101 @@ export function effectiveIz(baseIz, dc) {
   return baseIz * tempCorr * circuitCorr;
 }
 
+// ─── KECG-1702 도체·차단기 검토 (E-1) ──────────────────────────────────
+// 도체: SB / SCB / SVD% / SSC 4가지 검토 → 최대값 = 최종 단면적
+// 차단기: ATB / ATTh / ATSC 3가지 검토 → 최대값 = 최종 AT
+// 단락전류 ISC는 단순화 — 별도 정밀 계산은 향후 단락전류 챕터에서.
+
+const SSC_K_XLPE = 143;  // KEC 212.5-1 XLPE 절연 동선 상수
+
+/**
+ * 변압기·발전기 정격 기준 단락전류 (단순화).
+ * 실제는 KEC 212.5에 따라 누적 임피던스 계산 필요. MVP는 정격 ÷ Xpu_avg.
+ */
+export function estimateISC(state, voltage) {
+  const v = toNum(voltage) || 380;
+  const t = state?.transformer;
+  const g = state?.generator;
+  const kva = (t && toNum(t.capacity)) || (g && toNum(g.capacity)) || 500;
+  const ratedI = (kva * 1000) / (Math.sqrt(3) * v);
+  // 변압기 임피던스 5%, 발전기 Xd″ 25% — 평균적인 단락 배수 약 10~20배 가정.
+  // KEC 212.5 정밀 계산 전에 단순화로 정격의 20배 사용.
+  return ratedI * 20;
+}
+
+/** SB: 허용전류 IB ≤ Iz × DF 만족 최소 단면적 */
+export function reviewSB(ib, dc) {
+  if (!Number.isFinite(ib) || ib <= 0) return null;
+  for (const s of STANDARD_MM2) {
+    if (effectiveIz(CABLE_IZ_CU[s] || 0, dc) >= ib) return s;
+  }
+  return STANDARD_MM2[STANDARD_MM2.length - 1];
+}
+
+/** SCB: 차단기 정격 IN ≤ Iz × DF 만족 최소 단면적 */
+export function reviewSCB(at, dc) {
+  if (!Number.isFinite(at) || at <= 0) return null;
+  for (const s of STANDARD_MM2) {
+    if (effectiveIz(CABLE_IZ_CU[s] || 0, dc) >= at) return s;
+  }
+  return STANDARD_MM2[STANDARD_MM2.length - 1];
+}
+
+/** SVD%: %VD ≤ 한계 만족 최소 단면적 */
+export function reviewSVD({ ib, lengthM, voltage, vdLimit, k }) {
+  if (!Number.isFinite(ib) || ib <= 0 || !Number.isFinite(voltage) || voltage <= 0) return null;
+  for (const s of STANDARD_MM2) {
+    if (lengthM <= 0) return s;
+    const e = k * lengthM * ib / (1000 * s);
+    const vdPct = (e / voltage) * 100;
+    if (vdPct < vdLimit) return s;
+  }
+  return STANDARD_MM2[STANDARD_MM2.length - 1];
+}
+
+/** SSC: 단락전류 열적 보호 — S ≥ ISC × √t / K (KEC 212.5-1) */
+export function reviewSSC(isc, dc) {
+  if (!Number.isFinite(isc) || isc <= 0) return null;
+  const t = toNum(dc?.scInstantTime) || 0.03;
+  const safety = toNum(dc?.safetyFactorSSC) || 1.25;
+  const sMin = (isc * Math.sqrt(t) / SSC_K_XLPE) * safety;
+  for (const s of STANDARD_MM2) if (s >= sMin) return s;
+  return STANDARD_MM2[STANDARD_MM2.length - 1];
+}
+
+/** ATB: IB 이상의 표준 AT (= recommendBreakerAT) */
+export function reviewATB(ib, kind) {
+  return recommendBreakerAT(ib, kind);
+}
+
+/**
+ * ATTh: 차단기 규약동작전류 I2 ≤ 1.45 × Iz
+ *   AT × i2_coef ≤ 1.45 × Iz   →   AT_max ≤ 1.45 × Iz / i2_coef
+ *   현재 입력 AT 가 이 조건 만족하는지 표시.
+ */
+export function reviewATTh(at, cableMm2, dc, kind = "MCCB") {
+  if (!Number.isFinite(at) || at <= 0 || !cableMm2) return null;
+  const iz = effectiveIz(CABLE_IZ_CU[cableMm2] || 0, dc);
+  // KEC 표 — 산업용 ≤63A 1.30, 그 외 1.45
+  let i2 = 1.45;
+  if (kind === "MCCB" || kind === "CBR") i2 = at <= 63 ? 1.30 : 1.37;
+  else if (kind === "MCB" || kind === "RCBO") i2 = at <= 63 ? 1.45 : 1.52;
+  const atMax = 1.45 * iz / i2;
+  return { atMax, iz, i2, ok: at <= atMax };
+}
+
+/**
+ * ATSC: 단락전류 보호 (KEC 212.5) — tN ≤ tZ
+ *   tZ = (K × S / ISC)²
+ *   차단기 순시동작시간 tN (DC.scInstantTime ≈ 0.03 s) 보다 tZ 가 커야 OK.
+ */
+export function reviewATSC(isc, cableMm2, dc) {
+  if (!Number.isFinite(isc) || isc <= 0 || !cableMm2) return null;
+  const tN = toNum(dc?.scInstantTime) || 0.03;
+  const tZ = Math.pow(SSC_K_XLPE * cableMm2 / isc, 2);
+  return { tN, tZ, ok: tN <= tZ };
+}
+
 /**
  * IB와 %VD 한계 모두 만족하는 최소 표준 단면적 추천.
  * @param {object} opts

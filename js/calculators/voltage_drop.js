@@ -16,6 +16,7 @@
 import { fmt1, fmt2, fmtInt, toNum, escapeHtml } from "../lib/format.js";
 import { buildDesignDefaults } from "../lib/design_schema.js";
 import { subtreeLoadVA } from "./panels.js";
+import { reviewSB, reviewSCB, reviewSVD, reviewSSC, reviewATB, reviewATTh, reviewATSC, estimateISC } from "../lib/recommend.js";
 
 // ── MCC helpers (kept inline; mcc.js doesn't export them) ───────────────
 function mccMotorIB(motor, mcc) {
@@ -226,6 +227,146 @@ function verdict(totalPct, branchPct, totalLimit, branchLimit) {
   return { cls: "ok", label: "적정" };
 }
 
+// ─── KECG-1702 도체·차단기 검토 표 (E-1) ─────────────────────────────
+function renderConductorReview(rows, dc, state) {
+  const reviewRows = rows.filter(r => r.status !== "missing" && Number.isFinite(r.i) && r.i > 0);
+  if (reviewRows.length === 0) return "";
+  const vdLimit = toNum(dc.vdAllowedBranchPL) || 3;
+  const voltageStr = String(state.transformer?.voltage || state.generator?.voltage || state.designConditions?.systemVoltage || "380");
+  const v100 = (voltageStr.match(/\d+/g) || ["380"]).map(Number).filter(n => n >= 100)[0] || 380;
+  const isc = estimateISC(state, v100);
+
+  return `
+    <h3 class="section-title">도체 단면적 검토 (KECG-1702 / KEC 212.5)</h3>
+    <div class="meta">
+      ※ 단락전류 ISC ≈ <strong>${fmtInt(isc)} A</strong> 단순 가정 (변압기·발전기 정격의 20배).
+      정밀 산정은 별도 단락전류 챕터 예정.
+    </div>
+    <table class="t">
+      <thead>
+        <tr>
+          <th style="width:32px">#</th>
+          <th style="width:50px">구분</th>
+          <th style="width:110px">분전반/MCC</th>
+          <th>회로</th>
+          <th class="num" style="width:60px">IB [A]</th>
+          <th class="num" style="width:60px">입력 ㎟</th>
+          <th class="num" style="width:50px">SB</th>
+          <th class="num" style="width:50px">SCB</th>
+          <th class="num" style="width:60px">SVD%</th>
+          <th class="num" style="width:50px">SSC</th>
+          <th class="num" style="width:60px">최종 ㎟</th>
+          <th style="width:100px">판정</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${reviewRows.map((r, i) => {
+          const phase = r.panel.phase || "3Φ4W";
+          const k = COPPER_K[phase] ?? 35.6;
+          const inputMm2 = toNum(r.circuit.cableSizeMm2);
+          const breakerAT = toNum(r.circuit.breakerAT);
+
+          const sb = reviewSB(r.i, dc);
+          const scb = breakerAT ? reviewSCB(breakerAT, dc) : null;
+          const svd = reviewSVD({ ib: r.i, lengthM: r.l || 0, voltage: r.v, vdLimit, k });
+          const ssc = reviewSSC(isc, dc);
+          const finalMm2 = Math.max(sb || 0, scb || 0, svd || 0, ssc || 0);
+
+          let cls = "missing", label = "미입력";
+          if (inputMm2) {
+            if (inputMm2 >= finalMm2) { cls = "ok"; label = "✓ 적정"; }
+            else { cls = "fail"; label = `✗ 부족 (≥${finalMm2})`; }
+          }
+          const isMcc = r.source === "mcc";
+          return `
+            <tr class="vd-${cls}">
+              <td class="idx">${i + 1}</td>
+              <td><span style="font-size:10px; padding:1px 6px; background:${isMcc ? "#fef3c7" : "#dbeafe"}; color:${isMcc ? "#92400e" : "#1e40af"}; border-radius:999px;">${isMcc ? "MCC" : "분전반"}</span></td>
+              <td>${escapeHtml(r.panel.name)}</td>
+              <td>${escapeHtml(r.circuit.name || "(이름없음)")}</td>
+              <td class="num">${fmt2(r.i)}</td>
+              <td class="num">${inputMm2 ?? "-"}</td>
+              <td class="num">${sb ?? "-"}</td>
+              <td class="num">${scb ?? "-"}</td>
+              <td class="num">${svd ?? "-"}</td>
+              <td class="num">${ssc ?? "-"}</td>
+              <td class="num"><strong>${finalMm2 || "-"}</strong></td>
+              <td class="verdict-${cls}">${label}</td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderBreakerReview(rows, dc, state) {
+  // 분전반 회로만 (MCC 모터 차단기는 IMS/II 별도 산정 필요)
+  const reviewRows = rows.filter(r => r.source === "panel" && r.status !== "missing" && Number.isFinite(r.i) && r.i > 0);
+  if (reviewRows.length === 0) return "";
+  const isc = estimateISC(state, (state.transformer?.voltage || "380").match(/\d+/)?.[0] || 380);
+
+  return `
+    <h3 class="section-title">차단기 정격 검토 (KECG-1702 / KEC 212.4)</h3>
+    <div class="meta">※ MCC 모터 차단기는 기동전류 IMS·돌입전류 II 별도 검토 (추후 추가).</div>
+    <table class="t">
+      <thead>
+        <tr>
+          <th style="width:32px">#</th>
+          <th style="width:110px">분전반</th>
+          <th>회로</th>
+          <th class="num" style="width:60px">IB [A]</th>
+          <th class="num" style="width:60px">입력 AT</th>
+          <th style="width:60px">종류</th>
+          <th class="num" style="width:60px">ATB</th>
+          <th style="width:140px">ATTh (열적 보호)</th>
+          <th style="width:160px">ATSC (단락 보호)</th>
+          <th style="width:100px">판정</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${reviewRows.map((r, i) => {
+          const inputAT = toNum(r.circuit.breakerAT);
+          const breakerKind = r.circuit.breakerType || "MCCB";
+          const inputMm2 = toNum(r.circuit.cableSizeMm2);
+
+          const atb = reviewATB(r.i, breakerKind);
+          const atth = inputAT && inputMm2 ? reviewATTh(inputAT, inputMm2, dc, breakerKind) : null;
+          const atsc = inputMm2 ? reviewATSC(isc, inputMm2, dc) : null;
+
+          let cls = "missing", label = "미입력";
+          if (inputAT) {
+            const okATB = inputAT >= (atb || 0);
+            const okATTh = atth?.ok ?? true;
+            const okATSC = atsc?.ok ?? true;
+            if (okATB && okATTh && okATSC) { cls = "ok"; label = "✓ 적정"; }
+            else {
+              cls = "fail";
+              const fails = [];
+              if (!okATB) fails.push("ATB");
+              if (!okATTh) fails.push("ATTh");
+              if (!okATSC) fails.push("ATSC");
+              label = `✗ ${fails.join(",")}`;
+            }
+          }
+          return `
+            <tr class="vd-${cls}">
+              <td class="idx">${i + 1}</td>
+              <td>${escapeHtml(r.panel.name)}</td>
+              <td>${escapeHtml(r.circuit.name || "(이름없음)")}</td>
+              <td class="num">${fmt2(r.i)}</td>
+              <td class="num">${inputAT ?? "-"}</td>
+              <td>${escapeHtml(breakerKind)}</td>
+              <td class="num">${atb ?? "-"}</td>
+              <td>${atth ? `${atth.ok ? "✓" : "✗"} AT≤${fmt1(atth.atMax)}` : "-"}</td>
+              <td>${atsc ? `${atsc.ok ? "✓" : "✗"} tZ=${fmt2(atsc.tZ)}s > tN=${fmt2(atsc.tN)}s` : "-"}</td>
+              <td class="verdict-${cls}">${label}</td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
 export function renderVoltageDrop(view, state, save) {
   const panels = state.panels || [];
   const mccPanels = state.mccPanels || [];
@@ -243,7 +384,7 @@ export function renderVoltageDrop(view, state, save) {
       rows.push({ panel: p, circuit: c, source: "panel", ...r });
     }
   }
-  // MCC motors as "virtual" circuits — treat MCC as a self-contained panel
+  // MCC motors as "virtual" circuits — keep full object references for downstream review
   for (const mcc of mccPanels) {
     for (let mi = 0; mi < mcc.motors.length; mi++) {
       const motor = mcc.motors[mi];
@@ -251,8 +392,8 @@ export function renderVoltageDrop(view, state, save) {
       const r = computeMccRow(motor, mcc, totalLimit);
       r.verdict = verdict(r.totalPct, r.branchPct, totalLimit, branchLimit);
       rows.push({
-        panel: { id: mcc.id, name: mcc.name, _mcc: true },     // pseudo-panel for display
-        circuit: { name: motor.equipName || `(${motor.equipNo || mi + 1})` },
+        panel: mcc,
+        circuit: { ...motor, name: motor.equipName || `(${motor.equipNo || mi + 1})` },
         source: "mcc",
         ...r,
       });
@@ -413,6 +554,8 @@ export function renderVoltageDrop(view, state, save) {
             🎉 부적합·주의 회로가 없습니다. 모든 회로가 적정 또는 미입력 상태입니다.
           </div>
         ` : ""}
+        ${renderConductorReview(rows, dc, state)}
+        ${renderBreakerReview(rows, dc, state)}
       `}
     </article>
   `;
